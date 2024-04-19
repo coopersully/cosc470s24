@@ -3,10 +3,13 @@ import requests
 from flickrapi import FlickrAPI
 from PIL import Image
 from io import BytesIO
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # API Access
-FLICKR_PUBLIC = '831975cd6971fa3862b4f8e2974e2c7b'
-FLICKR_SECRET = '99d7043e6c0778ec'
+FLICKR_PUBLIC = os.environ.get('FLICKR_PUBLIC')
+FLICKR_SECRET = os.environ.get('FLICKR_SECRET')
 
 # Flickr Group Settings
 group_id = '2986814@N24'
