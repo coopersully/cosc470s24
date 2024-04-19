@@ -1,153 +1,204 @@
-import numpy as np
-from tensorflow.keras.datasets import cifar10
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Reshape, Flatten, Conv2D, Conv2DTranspose
-from tensorflow.keras.layers import LeakyReLU, Dropout, BatchNormalization
-from tensorflow.keras.optimizers import Adam
-import matplotlib.pyplot as plt
+# example of a dcgan on cifar10
+from numpy import expand_dims
+from numpy import zeros
+from numpy import ones
+from numpy import vstack
+from numpy.random import randn
+from numpy.random import randint
+from keras.datasets.cifar10 import load_data
+from keras.optimizers import Adam
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.layers import Reshape
+from keras.layers import Flatten
+from keras.layers import Conv2D
+from keras.layers import Conv2DTranspose
+from keras.layers import LeakyReLU
+from keras.layers import Dropout
+from matplotlib import pyplot
 
 
-# Load and prepare the CIFAR-10 dataset
-def load_real_samples():
-    (trainX, _), (_, _) = cifar10.load_data()
-    X = trainX.astype('float32')
-    X = (X - 127.5) / 127.5
-    return X
-
-
-# Define the standalone discriminator model
+# define the standalone discriminator model
 def define_discriminator(in_shape=(32, 32, 3)):
     model = Sequential()
+    # normal
     model.add(Conv2D(64, (3, 3), padding='same', input_shape=in_shape))
-    model.add(LeakyReLU(negative_slope=0.2))
-    model.add(Dropout(0.2))
+    model.add(LeakyReLU(alpha=0.2))
+    # downsample
+    model.add(Conv2D(128, (3, 3), strides=(2, 2), padding='same'))
+    model.add(LeakyReLU(alpha=0.2))
+    # downsample
+    model.add(Conv2D(128, (3, 3), strides=(2, 2), padding='same'))
+    model.add(LeakyReLU(alpha=0.2))
+    # downsample
+    model.add(Conv2D(256, (3, 3), strides=(2, 2), padding='same'))
+    model.add(LeakyReLU(alpha=0.2))
+    # classifier
     model.add(Flatten())
+    model.add(Dropout(0.4))
     model.add(Dense(1, activation='sigmoid'))
+    # compile model
     opt = Adam(learning_rate=0.0002, beta_1=0.5)
     model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
     return model
 
 
-# Define the standalone generator model
+# define the standalone generator model
 def define_generator(latent_dim):
     model = Sequential()
-    n_nodes = 256 * 8 * 8
+    # foundation for 4x4 image
+    n_nodes = 256 * 4 * 4
     model.add(Dense(n_nodes, input_dim=latent_dim))
-    model.add(LeakyReLU(negative_slope=0.2))
-    model.add(Reshape((8, 8, 256)))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Reshape((4, 4, 256)))
+    # upsample to 8x8
     model.add(Conv2DTranspose(128, (4, 4), strides=(2, 2), padding='same'))
-    model.add(LeakyReLU(negative_slope=0.2))
+    model.add(LeakyReLU(alpha=0.2))
+    # upsample to 16x16
     model.add(Conv2DTranspose(128, (4, 4), strides=(2, 2), padding='same'))
-    model.add(LeakyReLU(negative_slope=0.2))
+    model.add(LeakyReLU(alpha=0.2))
+    # upsample to 32x32
+    model.add(Conv2DTranspose(128, (4, 4), strides=(2, 2), padding='same'))
+    model.add(LeakyReLU(alpha=0.2))
+    # output layer
     model.add(Conv2D(3, (3, 3), activation='tanh', padding='same'))
     return model
 
 
-# Define the combined generator and discriminator model, for updating the generator
-def define_gan(generator, discriminator):
-    discriminator.trainable = False
+# define the combined generator and discriminator model, for updating the generator
+def define_gan(g_model, d_model):
+    # make weights in the discriminator not trainable
+    d_model.trainable = False
+    # connect them
     model = Sequential()
-    model.add(generator)
-    model.add(discriminator)
+    # add generator
+    model.add(g_model)
+    # add the discriminator
+    model.add(d_model)
+    # compile model
     opt = Adam(learning_rate=0.0002, beta_1=0.5)
     model.compile(loss='binary_crossentropy', optimizer=opt)
     return model
 
 
+# load and prepare cifar10 training images
+def load_real_samples():
+    # load cifar10 dataset
+    (trainX, _), (_, _) = load_data()
+    # convert from unsigned ints to floats
+    X = trainX.astype('float32')
+    # scale from [0,255] to [-1,1]
+    X = (X - 127.5) / 127.5
+    return X
+
+
+# select real samples
 def generate_real_samples(dataset, n_samples):
-    # Choose random instances
-    ix = np.random.randint(0, dataset.shape[0], n_samples)
-    # Select images
+    # choose random instances
+    ix = randint(0, dataset.shape[0], n_samples)
+    # retrieve selected images
     X = dataset[ix]
-    # Generate class labels, 1 for real images
-    y = np.ones((n_samples, 1))
+    # generate 'real' class labels (1)
+    y = ones((n_samples, 1))
     return X, y
 
 
-def generate_fake_samples(generator, latent_dim, n_samples):
-    # Generate points in latent space
-    x_input = np.random.randn(latent_dim * n_samples)
-    # Reshape into a batch of inputs for the network
+# generate points in latent space as input for the generator
+def generate_latent_points(latent_dim, n_samples):
+    # generate points in the latent space
+    x_input = randn(latent_dim * n_samples)
+    # reshape into a batch of inputs for the network
     x_input = x_input.reshape(n_samples, latent_dim)
-    # Generate images
-    X = generator.predict(x_input)
-    # Create class labels, 0 for fake images
-    y = np.zeros((n_samples, 1))
+    return x_input
+
+
+# use the generator to generate n fake examples, with class labels
+def generate_fake_samples(g_model, latent_dim, n_samples):
+    # generate points in latent space
+    x_input = generate_latent_points(latent_dim, n_samples)
+    # predict outputs
+    X = g_model.predict(x_input)
+    # create 'fake' class labels (0)
+    y = zeros((n_samples, 1))
     return X, y
 
 
-def train(g_model, d_model, gan_model, dataset, latent_dim, n_epochs=200, n_batch=128):
+# create and save a plot of generated images
+def save_plot(examples, epoch, n=10):
+    # Adjust to scale and plot only 10 images in a 2x5 grid
+    examples = (examples + 1) / 2.0
+    for i in range(n):
+        pyplot.subplot(2, 5, 1 + i)
+        pyplot.axis('off')
+        pyplot.imshow(examples[i])
+    filename = 'generated_plot_e%03d.png' % (epoch + 1)
+    pyplot.savefig(filename)
+    pyplot.close()
+
+
+# evaluate the discriminator, plot generated images, save generator model
+def summarize_performance(epoch, g_model, d_model, dataset, latent_dim, n_samples=150):
+    # prepare real samples
+    X_real, y_real = generate_real_samples(dataset, n_samples)
+    # evaluate discriminator on real examples
+    _, acc_real = d_model.evaluate(X_real, y_real, verbose=0)
+    # prepare fake examples
+    x_fake, y_fake = generate_fake_samples(g_model, latent_dim, n_samples=10)  # Adjusted from 150 to 10
+    # evaluate discriminator on fake examples
+    _, acc_fake = d_model.evaluate(x_fake, y_fake, verbose=0)
+    # summarize discriminator performance
+    print('>Accuracy real: %.0f%%, fake: %.0f%%' % (acc_real * 100, acc_fake * 100))
+    # save plot
+    save_plot(x_fake, epoch)
+    # save the generator model tile file
+    filename = 'generator_model_%03d.h5' % (epoch + 1)
+    g_model.save(filename)
+
+
+# train the generator and discriminator
+def train(g_model, d_model, gan_model, dataset, latent_dim, n_epochs=200, n_batch=64):
     bat_per_epo = int(dataset.shape[0] / n_batch)
     half_batch = int(n_batch / 2)
-    # Manually enumerate epochs
+    # manually enumerate epochs
     for i in range(n_epochs):
-        # Enumerate batches over the training set
+        # enumerate batches over the training set
         for j in range(bat_per_epo):
-            # Get randomly selected 'real' samples
+            # get randomly selected 'real' samples
             X_real, y_real = generate_real_samples(dataset, half_batch)
-            # Update discriminator model weights
+            # update discriminator model weights
             d_loss1, _ = d_model.train_on_batch(X_real, y_real)
-            # Generate 'fake' examples
+            # generate 'fake' examples
             X_fake, y_fake = generate_fake_samples(g_model, latent_dim, half_batch)
-            # Update discriminator model weights
+            # update discriminator model weights
             d_loss2, _ = d_model.train_on_batch(X_fake, y_fake)
-            # Prepare points in latent space as input for the generator
-            X_gan = np.random.randn(latent_dim * n_batch)
-            X_gan = X_gan.reshape(n_batch, latent_dim)
-            # Create inverted labels for the fake samples
-            y_gan = np.ones((n_batch, 1))
-            # Update the generator via the discriminator's error
+            # prepare points in latent space as input for the generator
+            X_gan = generate_latent_points(latent_dim, n_batch)
+            # create inverted labels for the fake samples
+            y_gan = ones((n_batch, 1))
+            # update the generator via the discriminator's error
             g_loss = gan_model.train_on_batch(X_gan, y_gan)
-            # Summarize loss on this batch
-            print('>%d, %d/%d, d1=%.3f, d2=%.3f g=%.3f' % (i + 1, j + 1, bat_per_epo, d_loss1, d_loss2, g_loss))
-        # Evaluate the model performance, sometimes
+            # summarize loss on this batch
+            print('>%d, %d/%d, d1=%.3f, d2=%.3f g=%.3f' %
+                  (i + 1, j + 1, bat_per_epo, d_loss1, d_loss2, g_loss))
+        # evaluate the model performance, sometimes
         if (i + 1) % 10 == 0:
             summarize_performance(i, g_model, d_model, dataset, latent_dim)
 
 
-# Function to save generated images for monitoring progress
-def summarize_performance(epoch, generator, discriminator, dataset, latent_dim, n_samples=150):
-    X_real, y_real = generate_real_samples(dataset, n_samples)
-    _, acc_real = discriminator.evaluate(X_real, y_real, verbose=0)
-    x_fake, y_fake = generate_fake_samples(generator, latent_dim, n_samples)
-    _, acc_fake = discriminator.evaluate(x_fake, y_fake, verbose=0)
-    print('>Accuracy real: %.0f%%, fake: %.0f%%' % (acc_real * 100, acc_fake * 100))
-    # Save plot
-    save_plot(x_fake, epoch)
-    # Save the generator model
-    filename = 'generator_model_%03d.h5' % (epoch + 1)
-    generator.save(filename)
-
-
-# Function to create and save a plot of generated images
-def save_plot(examples, epoch, n=10):
-    # Scale from [-1,1] to [0,1]
-    examples = (examples + 1) / 2.0
-    # Plot images
-    for i in range(n):
-        plt.subplot(2, 5, 1 + i)
-        plt.axis('off')
-        plt.imshow(examples[i])
-    # Save plot to file
-    filename = 'generated_plot_e%03d.png' % (epoch + 1)
-    plt.savefig(filename)
-    plt.close()
-
-
-# Size of the latent space
+# size of the latent space
 latent_dim = 100
 
-# Create the discriminator
-discriminator = define_discriminator()
+# create the discriminator
+d_model = define_discriminator()
 
-# Create the generator
-generator = define_generator(latent_dim)
+# create the generator
+g_model = define_generator(latent_dim)
 
-# Create the GAN
-gan_model = define_gan(generator, discriminator)
+# create the gan
+gan_model = define_gan(g_model, d_model)
 
-# Load and prepare CIFAR-10 training images
+# load image data
 dataset = load_real_samples()
 
-# Train the model
-train(generator, discriminator, gan_model, dataset, latent_dim)
+# train model
+train(g_model, d_model, gan_model, dataset, latent_dim)
