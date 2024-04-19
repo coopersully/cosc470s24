@@ -16,7 +16,7 @@ def load_data(directory):
     # Load images using image_dataset_from_directory
     dataset = tf.keras.preprocessing.image_dataset_from_directory(
         directory,
-        label_mode=None,  # Because we're only interested in the images (unsupervised)
+        label_mode=None,  # only interested in the images (unsupervised)
         image_size=(32, 32),
         batch_size=32,
         shuffle=True
@@ -94,7 +94,7 @@ def train(dataset, epochs, generator, discriminator, generator_optimizer, discri
             train_step(image_batch, generator, discriminator, generator_optimizer, discriminator_optimizer,
                        image_batch.shape[0], noise_dim)
 
-        # Produce images for the GIF as we go
+        # Produce images for the GIF
         display.clear_output(wait=True)
         generate_and_save_images(generator, epoch + 1, seed)
 
@@ -140,7 +140,7 @@ def generate_and_save_images(model, epoch, test_input):
     plt.show()
 
 
-# Helper function to make sure image directory is right bc sometimes im dumb
+# Helper function to make sure image directory is right bc sometimes I'm dumb
 def verify_image_directory(directory_path, min_image_count=100):
     # Check if the directory exists
     if not os.path.exists(directory_path):
@@ -171,7 +171,6 @@ EPOCHS = 50
 noise_dim = 100
 num_examples_to_generate = 16
 
-# We will reuse this seed overtime to visualize progress
 seed = tf.random.normal([num_examples_to_generate, noise_dim])
 
 if __name__ == '__main__':
